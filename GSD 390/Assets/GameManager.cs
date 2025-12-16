@@ -7,25 +7,30 @@ public class GameManager : MonoBehaviour
     public static GameManager Instance { get; private set; }
 
     [Header("Game Settings")]
-    [SerializeField] private float timeLimit = 30f;
-    [SerializeField] private Transform player;          // drag your Robot root here
+    [SerializeField] private float timeLimit = 90f;
+    [SerializeField] private Transform player;
     [SerializeField] private float fallYThreshold = -2f;
 
     [Header("UI")]
-    [SerializeField] private TMP_Text timerText;        // TimerText
-    [SerializeField] private TMP_Text messageText;      // MessageText
-    [SerializeField] private GameObject startScreenPanel; // StartScreenPanel
-    [SerializeField] private GameObject pauseMenuPanel;   // PauseMenuPanel
+    [SerializeField] private TMP_Text timerText;
+    [SerializeField] private TMP_Text messageText;
+    [SerializeField] private GameObject pauseMenuPanel;
 
-    [Header("Cameras")]
-    [SerializeField] private GameObject playerFollowCamera; // PlayerFollowCamera (Cinemachine virtual cam)
+    [Header("Scenes")]
+    [SerializeField] private int titleSceneBuildIndex = 0;
+    [SerializeField] private int gameCompleteBuildIndex = 3;
+    [SerializeField] private int lastPlayableLevelBuildIndex = 2;
 
     private int totalStars;
     private int collectedStars;
     private float timeRemaining;
+
     private bool gameOver = false;
-    private bool gameStarted = false;
     private bool isPaused = false;
+    private bool hasWon = false;
+
+    private const string WIN_TEXT =
+        "You Win!\nPress R to play again\nPress T to back to title\nPress C to continue";
 
     private void Awake()
     {
@@ -35,98 +40,52 @@ public class GameManager : MonoBehaviour
             return;
         }
         Instance = this;
+        Time.timeScale = 1f;
     }
 
     private void Start()
     {
         timeRemaining = timeLimit;
 
-        if (messageText != null)
-            messageText.text = "";
+        if (messageText != null) messageText.text = "";
+        if (pauseMenuPanel != null) pauseMenuPanel.SetActive(false);
 
-        totalStars = FindObjectsOfType<CollectibleStar>().Length;
-        Debug.Log($"Total stars in scene: {totalStars}");
+        totalStars = FindObjectsOfType<CollectibleStar>(true).Length;
+        collectedStars = 0;
 
-        // --- START SCREEN SETUP ---
-        Time.timeScale = 0f;
-        gameStarted = false;
-        isPaused = false;
-
-        if (startScreenPanel != null)
-            startScreenPanel.SetActive(true);
-
-        if (pauseMenuPanel != null)
-            pauseMenuPanel.SetActive(false);
-
-        // disable player until game actually starts
-        if (player != null)
-            player.gameObject.SetActive(false);
-
-        // camera can stay active to show the scene
-        if (playerFollowCamera != null)
-            playerFollowCamera.SetActive(true);
-
-        // show cursor for start screen
-        Cursor.visible = true;
-        Cursor.lockState = CursorLockMode.None;
+        LockCursorForPlay();
     }
 
-    // called by stars when collected
     public void OnStarCollected()
     {
-        if (gameOver || !gameStarted) return;
+        if (gameOver) return;
 
         collectedStars++;
-        Debug.Log($"Stars collected: {collectedStars}/{totalStars}");
-
         if (collectedStars >= totalStars)
-        {
             WinGame();
-        }
     }
 
     private void Update()
     {
-        // --- START SCREEN STATE ---
-        if (!gameStarted)
+        if (Input.GetKeyDown(KeyCode.T)) { GoToTitle(); return; }
+        if (Input.GetKeyDown(KeyCode.R)) { RestartLevel(); return; }
+
+        if (hasWon && Input.GetKeyDown(KeyCode.C))
         {
-            if (Input.GetKeyDown(KeyCode.Space))
-            {
-                StartGame();
-            }
+            ContinueToNext();
             return;
         }
 
-        // --- GAME OVER STATE ---
-        if (gameOver)
+        if (!gameOver && Input.GetKeyDown(KeyCode.Escape))
         {
-            if (Input.GetKeyDown(KeyCode.R))
-            {
-                RestartGame();
-            }
+            if (isPaused) ResumeGame();
+            else PauseGame();
             return;
         }
 
-        // --- PAUSED STATE ---
-        if (isPaused)
-        {
-            if (Input.GetKeyDown(KeyCode.Escape))
-            {
-                ResumeGame();
-            }
-            return;
-        }
+        if (isPaused || gameOver) return;
 
-        // check for pause toggle while playing
-        if (Input.GetKeyDown(KeyCode.Escape))
-        {
-            PauseGame();
-            return;
-        }
-
-        // --- PLAYING STATE ---
-
-        // timer
+        // Timer
         timeRemaining -= Time.deltaTime;
         if (timeRemaining < 0f) timeRemaining = 0f;
 
@@ -134,40 +93,51 @@ public class GameManager : MonoBehaviour
             timerText.text = $"Time: {timeRemaining:0.0}";
 
         if (timeRemaining <= 0f)
-        {
             LoseGame("Time's up!");
-        }
 
-        // fell off the stage?
         if (player != null && player.position.y < fallYThreshold)
-        {
             LoseGame("You fell off!");
-        }
     }
 
-    // ================== STATE HELPERS ==================
-
-    private void StartGame()
+    private void WinGame()
     {
-        gameStarted = true;
-        isPaused = false;
+        gameOver = true;
+        hasWon = true;
+        Time.timeScale = 0f;
+
+        if (messageText != null)
+            messageText.text = WIN_TEXT;
+
+        UnlockCursorForUI();
+    }
+
+    private void LoseGame(string reason)
+    {
+        if (gameOver) return;
+
+        gameOver = true;
+        hasWon = false;
+        Time.timeScale = 0f;
+
+        if (messageText != null)
+            messageText.text = $"{reason}\nPress R to restart\nPress T to title";
+
+        UnlockCursorForUI();
+    }
+
+    private void ContinueToNext()
+    {
         Time.timeScale = 1f;
 
-        if (startScreenPanel != null)
-            startScreenPanel.SetActive(false);
+        int cur = SceneManager.GetActiveScene().buildIndex;
 
-        if (pauseMenuPanel != null)
-            pauseMenuPanel.SetActive(false);
+        if (cur >= lastPlayableLevelBuildIndex)
+        {
+            SceneManager.LoadScene(gameCompleteBuildIndex);
+            return;
+        }
 
-        if (player != null)
-            player.gameObject.SetActive(true);
-
-        if (playerFollowCamera != null)
-            playerFollowCamera.SetActive(true);
-
-        // hide/lock cursor during gameplay
-        Cursor.visible = false;
-        Cursor.lockState = CursorLockMode.Locked;
+        SceneManager.LoadScene(cur + 1);
     }
 
     private void PauseGame()
@@ -175,14 +145,8 @@ public class GameManager : MonoBehaviour
         isPaused = true;
         Time.timeScale = 0f;
 
-        if (pauseMenuPanel != null)
-            pauseMenuPanel.SetActive(true);
-
-        if (playerFollowCamera != null)
-            playerFollowCamera.SetActive(false); // stop Cinemachine while paused
-
-        Cursor.visible = true;
-        Cursor.lockState = CursorLockMode.None;
+        if (pauseMenuPanel != null) pauseMenuPanel.SetActive(true);
+        UnlockCursorForUI();
     }
 
     public void ResumeGame()
@@ -192,56 +156,38 @@ public class GameManager : MonoBehaviour
         isPaused = false;
         Time.timeScale = 1f;
 
-        if (pauseMenuPanel != null)
-            pauseMenuPanel.SetActive(false);
-
-        if (playerFollowCamera != null)
-            playerFollowCamera.SetActive(true);
-
-        Cursor.visible = false;
-        Cursor.lockState = CursorLockMode.Locked;
+        if (pauseMenuPanel != null) pauseMenuPanel.SetActive(false);
+        LockCursorForPlay();
     }
 
-    public void RestartGame()
+    public void RestartLevel()
     {
         Time.timeScale = 1f;
-        Cursor.visible = false;
-        Cursor.lockState = CursorLockMode.Locked;
+        LockCursorForPlay();
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 
-    private void WinGame()
+    public void GoToTitle()
     {
-        gameOver = true;
-        Time.timeScale = 0f;
-        if (messageText != null)
-            messageText.text = "You Win! Press R to restart.";
-        Debug.Log("WIN");
-
-        Cursor.visible = true;
-        Cursor.lockState = CursorLockMode.None;
+        Time.timeScale = 1f;
+        UnlockCursorForUI();
+        SceneManager.LoadScene(titleSceneBuildIndex);
     }
 
-    private void LoseGame(string reason)
+    public void RestartFromButton() => RestartLevel();
+    public void ResumeFromButton() => ResumeGame();
+
+    public void SetVolume(float value) => AudioListener.volume = value;
+
+    private void LockCursorForPlay()
     {
-        if (gameOver) return;
-
-        gameOver = true;
-        Time.timeScale = 0f;
-        if (messageText != null)
-            messageText.text = $"{reason} Press R to restart.";
-        Debug.Log("LOSE: " + reason);
-
-        Cursor.visible = true;
-        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = false;
+        Cursor.lockState = CursorLockMode.Locked;
     }
 
-    // ============== UI CALLBACKS ==============
-
-    // Called by the VolumeSlider (On Value Changed)
-    public void SetVolume(float value)
+    private void UnlockCursorForUI()
     {
-        // value between 0 and 1
-        AudioListener.volume = value;
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
     }
 }
